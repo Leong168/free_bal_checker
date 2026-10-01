@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Inventory & Location Move App</title>
+    <!-- Tailwind CSS for clean, modern UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- HTML5 QR Code Scanner Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+    <!-- SheetJS for Excel Exports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen pb-12">
+
+    <!-- Header -->
+    <header class="bg-indigo-700 text-white shadow-md">
+        <div class="max-w-4xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                📦 Multi-Location Inventory & Move Tool
+            </h1>
+            <div class="flex gap-2">
+                <button onclick="switchTab('import')" id="nav-import" class="px-3 py-1.5 rounded bg-indigo-800 text-sm font-medium transition hover:bg-indigo-600">1. Import Data</button>
+                <button onclick="switchTab('scanner')" id="nav-scanner" class="px-3 py-1.5 rounded bg-indigo-900/60 text-sm font-medium transition hover:bg-indigo-600">2. Scan / Inquiry</button>
+                <button onclick="switchTab('history')" id="nav-history" class="px-3 py-1.5 rounded bg-indigo-900/60 text-sm font-medium transition hover:bg-indigo-600">3. Move History</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-4 mt-6">
+
+        <!-- TAB 1: IMPORT INVENTORY REPORT -->
+        <section id="tab-import" class="space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <h2 class="text-lg font-semibold text-slate-900 mb-2">Import Daily Inventory Report</h2>
+                <p class="text-sm text-slate-600 mb-4">
+                    Paste your comma-separated or tab-delimited inventory data below, or upload a CSV/Excel file. 
+                    <br><strong>Expected Columns (Header required):</strong> <code class="bg-slate-100 px-1 py-0.5 rounded text-xs">id, sku, location, opening_bal, order_qty_allocate, free_bal</code>
+                </p>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Upload File (CSV / Excel)</label>
+                        <input type="file" id="csvFileInput" accept=".csv, .xlsx, .xls" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer border border-slate-200 rounded-lg"/>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Or Paste Raw Data (CSV format)</label>
+                        <textarea id="rawCsvInput" rows="6" class="w-full font-mono text-xs border border-slate-300 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="id,sku,location,opening_bal,order_qty_allocate,free_bal&#10;1001,SKU-A01,Warehouse SG,500,50,450&#10;1001,SKU-A01,Warehouse MY,200,20,180&#10;1002,SKU-B02,Warehouse SG,300,0,300"></textarea>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3">
+                        <button onclick="processDataImport()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-2.5 rounded-lg shadow transition text-sm">
+                            Process & Save Daily Import
+                        </button>
+                        <button onclick="clearAllData()" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-medium px-4 py-2.5 rounded-lg transition text-sm flex items-center gap-1.5">
+                            🗑️ Clear All App Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import Status / Summary -->
+            <div id="importSummaryCard" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hidden">
+                <h3 class="font-semibold text-slate-800 mb-2">Import Status</h3>
+                <p id="importStatusText" class="text-sm text-emerald-600 font-medium"></p>
+                <div class="mt-4 overflow-x-auto">
+                    <table id="previewTable" class="w-full text-left text-xs text-slate-600 border-collapse">
+                        <!-- Dynamic preview rows -->
+                    </table>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- TAB 2: QR SCAN / INQUIRY -->
+        <section id="tab-scanner" class="space-y-6 hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Manual Key-in & Search Card -->
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900 mb-2">Item Inquiry</h2>
+                        <p class="text-sm text-slate-600 mb-4">Key in the Internal ID or SKU number to check stock balances across locations.</p>
+                        
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Internal ID or SKU</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="searchInputField" class="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="e.g. 1001 or SKU-A01" />
+                                    <button onclick="performItemSearch()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2 rounded-lg text-sm shadow transition">Check</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Camera QR Scanner Toggle -->
+                    <div class="mt-6 pt-4 border-t border-slate-100">
+                        <button onclick="toggleScanner()" id="scannerToggleBtn" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-medium py-2 px-4 rounded-lg text-sm transition flex items-center justify-center gap-2">
+                            📷 Open Rear Camera QR Scanner
+                        </button>
+                        <div id="reader-container" class="mt-3 hidden">
+                            <div id="qr-reader" class="w-full rounded-lg overflow-hidden border border-slate-300"></div>
+                            <button onclick="stopScanner()" class="mt-2 text-xs text-rose-600 font-medium hover:underline">Close Camera</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Results Card -->
+                <div id="resultsCard" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col justify-between hidden">
+                    <div>
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <span class="text-xs font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded" id="resInternalId">ID: --</span>
+                                <h3 class="text-xl font-bold text-slate-900 mt-1" id="resSku">SKU: --</h3>
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <h4 class="text-xs font-semibold uppercase text-slate-400 mb-2">Multi-Location Breakdown</h4>
+                            <div class="overflow-x-auto max-h-56 overflow-y-auto border border-slate-100 rounded-lg">
+                                <table class="w-full text-left text-xs">
+                                    <thead class="bg-slate-50 text-slate-700 sticky top-0">
+                                        <tr>
+                                            <th class="p-2.5">Location</th>
+                                            <th class="p-2.5 text-right">Opening</th>
+                                            <th class="p-2.5 text-right">Allocated</th>
+                                            <th class="p-2.5 text-right">Free Bal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="locationBreakdownBody" class="divide-y divide-slate-100">
+                                        <!-- Dynamic locations -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Options after result shown -->
+                    <div class="mt-6 pt-4 border-t border-slate-100 grid grid-cols-2 gap-3">
+                        <button onclick="handleCheckOthers()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2.5 px-4 rounded-lg text-sm transition text-center">
+                            a. Check Others
+                        </button>
+                        <button onclick="openMoveModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 px-4 rounded-lg text-sm transition text-center shadow">
+                            b. Move Location
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Empty State prompt if no search performed -->
+                <div id="emptySearchCard" class="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center">
+                    <span class="text-3xl mb-2">🔍</span>
+                    <h4 class="font-medium text-slate-700">No Item Searched Yet</h4>
+                    <p class="text-xs text-slate-500 mt-1">Scan a QR code with your phone camera or enter an ID/SKU on the left to view inventory details.</p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- TAB 3: MOVE HISTORY & EXPORT -->
+        <section id="tab-history" class="space-y-6 hidden">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                    <div>
+                        <h2 class="text-lg font-semibold text-slate-900">Inventory Move History</h2>
+                        <p class="text-sm text-slate-600">Log of all stock transfers recorded for today and previous sessions.</p>
+                    </div>
+                    <button onclick="exportMoveHistoryExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg text-sm shadow transition flex items-center gap-2">
+                        📥 Export Move History (Excel)
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table class="w-full text-left text-xs text-slate-600">
+                        <thead class="bg-slate-50 text-slate-700 uppercase font-semibold">
+                            <tr>
+                                <th class="p-3">Date & Time</th>
+                                <th class="p-3">Internal ID</th>
+                                <th class="p-3">SKU</th>
+                                <th class="p-3">Move From</th>
+                                <th class="p-3">Move To</th>
+                                <th class="p-3 text-right">Qty Moved</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody" class="divide-y divide-slate-100">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="emptyHistoryState" class="text-center py-8 text-slate-400 text-sm hidden">
+                    No relocation tasks recorded yet.
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MOVE LOCATION MODAL -->
+    <div id="moveModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-bold text-slate-900">Move Location Stock</h3>
+                <button onclick="closeMoveModal()" class="text-slate-400 hover:text-slate-600 font-bold">&times;</button>
+            </div>
+
+            <div class="bg-slate-50 p-3 rounded-lg text-xs space-y-1">
+                <div><span class="font-semibold">Item ID:</span> <span id="modalItemId">--</span></div>
+                <div><span class="font-semibold">SKU:</span> <span id="modalSku">--</span></div>
+            </div>
+
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Move From Location</label>
+                    <select id="moveFromLocation" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <!-- Populated dynamically -->
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Move To Location</label>
+                    <input type="text" id="moveToLocation" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Destination Location Name" />
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Quantity to Move</label>
+                    <input type="number" id="moveQtyInput" min="1" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Enter quantity" />
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button onclick="closeMoveModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Cancel</button>
+                <button onclick="confirmStockMove()" class="px-4 py-2 rounded-lg text-sm bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow">Confirm Move</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Logic Script -->
+    <script>
+        // State Management
+        let inventoryData = JSON.parse(localStorage.getItem('inventory_app_data')) || [];
+        let moveHistory = JSON.parse(localStorage.getItem('inventory_app_history')) || [];
+        let currentActiveItem = null;
+        let html5QrCode = null;
+
+        // Initialize on load
+        window.onload = function() {
+            renderHistoryTable();
+            if(inventoryData.length > 0) {
+                showImportSummary(inventoryData.length);
+            }
+
+            // File upload listener
+            document.getElementById('csvFileInput').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    document.getElementById('rawCsvInput').value = evt.target.result;
+                };
+                reader.readAsText(file);
+            });
+        };
+
+        // Tab Navigation
+        function switchTab(tabName) {
+            ['import', 'scanner', 'history'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.add('hidden');
+                document.getElementById(`nav-${t}`).className = "px-3 py-1.5 rounded bg-indigo-900/60 text-sm font-medium transition hover:bg-indigo-600";
+            });
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            document.getElementById(`nav-${tabName}`).className = "px-3 py-1.5 rounded bg-indigo-800 text-sm font-medium transition hover:bg-indigo-600";
+            
+            if(tabName === 'history') renderHistoryTable();
+        }
+
+        // 1. Process Daily Data Import
+        function processDataImport() {
+            const rawText = document.getElementById('rawCsvInput').value.trim();
+            if(!rawText) {
+                alert('Please upload a file or paste raw inventory data.');
+                return;
+            }
+
+            const lines = rawText.split('\n');
+            if(lines.length < 2) {
+                alert('Data format incorrect. Header row + at least 1 data row required.');
+                return;
+            }
+
+            const delimiter = lines[0].includes('\t') ? '\t' : ',';
+            const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase().replace(/['"]+/g, ''));
+            
+            // Expected headers validation check
+            const parsedRows = [];
+            for(let i=1; i < lines.length; i++) {
+                if(!lines[i].trim()) continue;
+                const cols = lines[i].split(delimiter).map(c => c.trim().replace(/['"]+/g, ''));
+                if(cols.length >= 6) {
+                    parsedRows.push({
+                        id: cols[0],
+                        sku: cols[1],
+                        location: cols[2],
+                        opening_bal: parseFloat(cols[3]) || 0,
+                        order_qty_allocate: parseFloat(cols[4]) || 0,
+                        free_bal: parseFloat(cols[5]) || 0
+                    });
+                }
+            }
+
+            if(parsedRows.length === 0) {
+                alert('No valid rows parsed. Please verify column order: id, sku, location, opening_bal, order_qty_allocate, free_bal');
+                return;
+            }
+
+            inventoryData = parsedRows;
+            localStorage.setItem('inventory_app_data', JSON.stringify(inventoryData));
+            showImportSummary(inventoryData.length);
+            alert(`Successfully imported ${inventoryData.length} inventory location records!`);
+            switchTab('scanner');
+        }
+
+        function showImportSummary(count) {
+            const card = document.getElementById('importSummaryCard');
+            card.classList.remove('hidden');
+            document.getElementById('importStatusText').innerText = `Active Database loaded with ${count} item-location records.`;
+            
+            const table = document.getElementById('previewTable');
+            let html = `<thead class="bg-slate-50 uppercase"><tr><th class="p-2">ID</th><th class="p-2">SKU</th><th class="p-2">Location</th><th class="p-2 text-right">Free Bal</th></tr></thead><tbody>`;
+            inventoryData.slice(0, 5).forEach(row => {
+                html += `<tr class="border-b border-slate-100"><td class="p-2">${row.id}</td><td class="p-2">${row.sku}</td><td class="p-2">${row.location}</td><td class="p-2 text-right font-semibold">${row.free_bal}</td></tr>`;
+            });
+            html += `</tbody>`;
+            table.innerHTML = html;
+        }
+
+        // 7. Clear All Data Function
+        function clearAllData() {
+            if(confirm('Are you sure you want to clear all inventory data and move history?')) {
+                inventoryData = [];
+                moveHistory = [];
+                localStorage.removeItem('inventory_app_data');
+                localStorage.removeItem('inventory_app_history');
+                document.getElementById('importSummaryCard').classList.add('hidden');
+                document.getElementById('rawCsvInput').value = '';
+                document.getElementById('csvFileInput').value = '';
+                document.getElementById('resultsCard').classList.add('hidden');
+                document.getElementById('emptySearchCard').classList.remove('hidden');
+                renderHistoryTable();
+                alert('All data cleared successfully.');
+            }
+        }
+
+        // 2. Scan / Inquiry Logic
+        function performItemSearch(queryParam = null) {
+            const query = queryParam || document.getElementById('searchInputField').value.trim();
+            if(!query) {
+                alert('Please enter an Internal ID or SKU.');
+                return;
+            }
+
+            if(inventoryData.length === 0) {
+                alert('Inventory database is empty. Please import your daily report first.');
+                switchTab('import');
+                return;
+            }
+
+            // Find matching records across locations
+            const matches = inventoryData.filter(item => item.id.toLowerCase() === query.toLowerCase() || item.sku.toLowerCase() === query.toLowerCase());
+
+            if(matches.length === 0) {
+                alert(`No inventory records found for ID/SKU: "${query}"`);
+                return;
+            }
+
+            currentActiveItem = {
+                id: matches[0].id,
+                sku: matches[0].sku,
+                locations: matches
+            };
+
+            // Render result view
+            document.getElementById('resInternalId').innerText = `ID: ${currentActiveItem.id}`;
+            document.getElementById('resSku').innerText = `SKU: ${currentActiveItem.sku}`;
+
+            let tbodyHtml = '';
+            matches.forEach(m => {
+                tbodyHtml += `
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-2.5 font-medium text-slate-800">${m.location}</td>
+                        <td class="p-2.5 text-right">${m.opening_bal}</td>
+                        <td class="p-2.5 text-right text-amber-600">${m.order_qty_allocate}</td>
+                        <td class="p-2.5 text-right font-bold text-emerald-600">${m.free_bal}</td>
+                    </tr>
+                `;
+            });
+            document.getElementById('locationBreakdownBody').innerHTML = tbodyHtml;
+
+            document.getElementById('emptySearchCard').classList.add('hidden');
+            document.getElementById('resultsCard').classList.remove('hidden');
+        }
+
+        // Camera QR Code Toggle & Scanner
+        function toggleScanner() {
+            const container = document.getElementById('reader-container');
+            if(container.classList.contains('hidden')) {
+                container.classList.remove('hidden');
+                html5QrCode = new Html5Qrcode("qr-reader");
+                html5QrCode.start(
+                    { facingMode: "environment" },
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    (decodedText) => {
+                        document.getElementById('searchInputField').value = decodedText;
+                        stopScanner();
+                        performItemSearch(decodedText);
+                    },
+                    (errorMessage) => {
+                        // scanning in progress...
+                    }
+                ).catch(err => {
+                    alert(`Unable to start camera: ${err}`);
+                    container.classList.add('hidden');
+                });
+            } else {
+                stopScanner();
+            }
+        }
+
+        function stopScanner() {
+            if(html5QrCode) {
+                html5QrCode.stop().then(() => {
+                    document.getElementById('reader-container').classList.add('hidden');
+                }).catch(err => {
+                    document.getElementById('reader-container').classList.add('hidden');
+                });
+            } else {
+                document.getElementById('reader-container').classList.add('hidden');
+            }
+        }
+
+        // 4. Check Others Option
+        function handleCheckOthers() {
+            currentActiveItem = null;
+            document.getElementById('searchInputField').value = '';
+            document.getElementById('resultsCard').classList.add('hidden');
+            document.getElementById('emptySearchCard').classList.remove('hidden');
+            document.getElementById('searchInputField').focus();
+        }
+
+        // 5. Move Location Modal & Action
+        function openMoveModal() {
+            if(!currentActiveItem) return;
+            document.getElementById('modalItemId').innerText = currentActiveItem.id;
+            document.getElementById('modalSku').innerText = currentActiveItem.sku;
+
+            // Populate source location dropdown
+            let opts = '';
+            currentActiveItem.locations.forEach(l => {
+                opts += `<option value="${l.location}">${l.location} (Free: ${l.free_bal})</option>`;
+            });
+            document.getElementById('moveFromLocation').innerHTML = opts;
+            document.getElementById('moveToLocation').value = '';
+            document.getElementById('moveQtyInput').value = '';
+
+            document.getElementById('moveModal').classList.remove('hidden');
+        }
+
+        function closeMoveModal() {
+            document.getElementById('moveModal').classList.add('hidden');
+        }
+
+        function confirmStockMove() {
+            const fromLoc = document.getElementById('moveFromLocation').value;
+            const toLoc = document.getElementById('moveToLocation').value.trim();
+            const qtyToMove = parseFloat(document.getElementById('moveQtyInput').value);
+
+            if(!toLoc) {
+                alert('Please specify a destination "Move To" location.');
+                return;
+            }
+            if(isNaN(qtyToMove) || qtyToMove <= 0) {
+                alert('Please enter a valid quantity to move.');
+                return;
+            }
+
+            // Find source record in current active item
+            const sourceRecord = currentActiveItem.locations.find(l => l.location === fromLoc);
+            if(!sourceRecord || sourceRecord.free_bal < qtyToMove) {
+                alert(`Insufficient free balance in ${fromLoc}. Available free balance is ${sourceRecord ? sourceRecord.free_bal : 0}.`);
+                return;
+            }
+
+            // Update main inventory dataset
+            // 1. Deduct from source
+            sourceRecord.free_bal -= qtyToMove;
+            sourceRecord.opening_bal -= qtyToMove;
+
+            // 2. Add or create in destination
+            let destRecord = inventoryData.find(l => l.id === currentActiveItem.id && l.location.toLowerCase() === toLoc.toLowerCase());
+            if(destRecord) {
+                destRecord.free_bal += qtyToMove;
+                destRecord.opening_bal += qtyToMove;
+            } else {
+                // Add new location record
+                inventoryData.push({
+                    id: currentActiveItem.id,
+                    sku: currentActiveItem.sku,
+                    location: toLoc,
+                    opening_bal: qtyToMove,
+                    order_qty_allocate: 0,
+                    free_bal: qtyToMove
+                });
+            }
+
+            // Save to localStorage
+            localStorage.setItem('inventory_app_data', JSON.stringify(inventoryData));
+
+            // Log History
+            const historyEntry = {
+                timestamp: new Date().toLocaleString(),
+                id: currentActiveItem.id,
+                sku: currentActiveItem.sku,
+                from: fromLoc,
+                to: toLoc,
+                qty: qtyToMove
+            };
+            moveHistory.unshift(historyEntry);
+            localStorage.setItem('inventory_app_history', JSON.stringify(moveHistory));
+
+            closeMoveModal();
+            alert(`Successfully moved ${qtyToMove} units of SKU ${currentActiveItem.sku} from ${fromLoc} to ${toLoc}!`);
+            
+            // Refresh search view & history
+            performItemSearch(currentActiveItem.id);
+            renderHistoryTable();
+        }
+
+        // 6. Export Move History as Excel
+        function renderHistoryTable() {
+            const tbody = document.getElementById('historyTableBody');
+            const emptyState = document.getElementById('emptyHistoryState');
+
+            if(moveHistory.length === 0) {
+                tbody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            let html = '';
+            moveHistory.forEach(h => {
+                html += `
+                    <tr class="hover:bg-slate-50">
+                        <td class="p-3 text-slate-500">${h.timestamp}</td>
+                        <td class="p-3 font-medium text-slate-800">${h.id}</td>
+                        <td class="p-3 font-medium text-indigo-600">${h.sku}</td>
+                        <td class="p-3">${h.from}</td>
+                        <td class="p-3 font-semibold text-slate-800">${h.to}</td>
+                        <td class="p-3 text-right font-bold text-emerald-600">${h.qty}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function exportMoveHistoryExcel() {
+            if(moveHistory.length === 0) {
+                alert('No move history to export.');
+                return;
+            }
+
+            const exportData = moveHistory.map(h => ({
+                "Date & Time": h.timestamp,
+                "Internal ID": h.id,
+                "SKU": h.sku,
+                "Move From Location": h.from,
+                "Move To Location": h.to,
+                "Qty Moved": h.qty
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Move History");
+            
+            const currentDateStr = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(workbook, `Inventory_Move_History_${currentDateStr}.xlsx`);
+        }
+    </script>
+</body>
+</html>
