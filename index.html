@@ -34,7 +34,7 @@
             <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h2 class="text-lg font-semibold text-slate-900 mb-2">Import Daily NetSuite Report</h2>
                 <p class="text-sm text-slate-600 mb-4">
-                    Upload your NetSuite Inventory Excel/CSV report or paste the raw text. 
+                    Upload your NetSuite Inventory Excel/CSV report. 
                     <br><strong>Supported Headers:</strong> <code class="bg-slate-100 px-1 py-0.5 rounded text-xs">internal id, item, location, on hand stocks, qty committed to SO, Qty on Hand - Qty Committed (Available from On Hand)</code>
                 </p>
 
@@ -212,7 +212,9 @@
 
                 <div>
                     <label class="block text-xs font-semibold uppercase text-slate-500 mb-1">Move To Location</label>
-                    <input type="text" id="moveToLocation" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="Destination Location Name" />
+                    <select id="moveToLocation" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <!-- Populated dynamically -->
+                    </select>
                 </div>
 
                 <div>
@@ -241,7 +243,6 @@
                 showImportSummary(inventoryData.length);
             }
 
-            // File upload listener using SheetJS (handles .xlsx, .xls, and .csv natively)
             document.getElementById('excelFileInput').addEventListener('change', function(e) {
                 const file = e.target.files[0];
                 if (!file) return;
@@ -269,7 +270,6 @@
             if(tabName === 'history') renderHistoryTable();
         }
 
-        // Process NetSuite Import mapping exact columns
         function processDataImport() {
             if(!window.pendingImportRows || window.pendingImportRows.length === 0) {
                 alert('Please select and upload your inventory file first.');
@@ -278,13 +278,11 @@
 
             const parsedRows = [];
             window.pendingImportRows.forEach(row => {
-                // Normalize keys to lowercase for flexible matching
                 const normRow = {};
                 Object.keys(row).forEach(k => {
                     normRow[k.trim().toLowerCase()] = row[k];
                 });
 
-                // Map NetSuite headers accurately based on your configuration
                 const id = String(normRow['internal id'] || normRow['internalid'] || normRow['id'] || '').trim();
                 const sku = String(normRow['item'] || normRow['sku'] || '').trim();
                 const location = String(normRow['location'] || '').trim();
@@ -292,7 +290,6 @@
                 const opening = parseFloat(normRow['on hand stocks'] || normRow['opening_bal'] || normRow['opening'] || 0) || 0;
                 const allocated = parseFloat(normRow['qty committed to so'] || normRow['order_qty_allocate'] || normRow['allocated'] || 0) || 0;
                 
-                // Check exact long header string or fallback keys
                 const freeKey = Object.keys(normRow).find(k => k.includes('available from on hand') || k.includes('free') || k.includes('balance'));
                 const free = freeKey !== undefined ? (parseFloat(normRow[freeKey]) || 0) : (opening - allocated);
 
@@ -444,14 +441,22 @@
             document.getElementById('modalItemId').innerText = currentActiveItem.id;
             document.getElementById('modalSku').innerText = currentActiveItem.sku;
 
-            let opts = '';
+            // Populate Move From Location Dropdown
+            let fromOpts = '';
             currentActiveItem.locations.forEach(l => {
-                opts += `<option value="${l.location}">${l.location} (Free Bal: ${l.free_bal})</option>`;
+                fromOpts += `<option value="${l.location}">${l.location} (Free Bal: ${l.free_bal})</option>`;
             });
-            document.getElementById('moveFromLocation').innerHTML = opts;
-            document.getElementById('moveToLocation').value = '';
-            document.getElementById('moveQtyInput').value = '';
+            document.getElementById('moveFromLocation').innerHTML = fromOpts;
 
+            // Populate Move To Location Dropdown with ALL unique locations present in the database
+            const allUniqueLocations = [...new Set(inventoryData.map(item => item.location))].sort();
+            let toOpts = '<option value="">-- Select Destination Location --</option>';
+            allUniqueLocations.forEach(loc => {
+                toOpts += `<option value="${loc}">${loc}</option>`;
+            });
+            document.getElementById('moveToLocation').innerHTML = toOpts;
+
+            document.getElementById('moveQtyInput').value = '';
             document.getElementById('moveModal').classList.remove('hidden');
         }
 
@@ -461,11 +466,15 @@
 
         function confirmStockMove() {
             const fromLoc = document.getElementById('moveFromLocation').value;
-            const toLoc = document.getElementById('moveToLocation').value.trim();
+            const toLoc = document.getElementById('moveToLocation').value;
             const qtyToMove = parseFloat(document.getElementById('moveQtyInput').value);
 
             if(!toLoc) {
-                alert('Please specify a destination "Move To" location.');
+                alert('Please select a destination "Move To" location from the dropdown.');
+                return;
+            }
+            if(fromLoc === toLoc) {
+                alert('"Move From" and "Move To" locations cannot be the same.');
                 return;
             }
             if(isNaN(qtyToMove) || qtyToMove <= 0) {
